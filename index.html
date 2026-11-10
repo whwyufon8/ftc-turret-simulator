@@ -1,0 +1,774 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="robots" content="noindex, nofollow, noarchive">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FTC 砲塔互動模擬器</title>
+  <style>
+    :root {
+      --bg: #111418;
+      --panel: #182024;
+      --field: #1b2424;
+      --grid: #2d3939;
+      --robot: #d8dee9;
+      --model: #69d2e7;
+      --real: #ffb454;
+      --goal: #ff5a5f;
+      --ideal: #83c77b;
+      --text: #eef2f5;
+      --muted: #9aa6b2;
+      --line: #303b40;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      width: 100%;
+      min-height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Microsoft JhengHei", "Noto Sans TC", "Segoe UI", Arial, sans-serif;
+    }
+
+    .app {
+      width: 100vw;
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: minmax(680px, 1fr) 390px;
+    }
+
+    .stage {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    canvas {
+      width: 100%;
+      height: auto;
+      max-height: calc(100vh - 48px);
+      aspect-ratio: 1 / 1;
+      border: 1px solid var(--line);
+      background: #12181b;
+      cursor: grab;
+      touch-action: none;
+    }
+
+    canvas:active {
+      cursor: grabbing;
+    }
+
+    .sidebar {
+      min-height: 100vh;
+      background: var(--panel);
+      border-left: 1px solid var(--line);
+      padding: 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      overflow-y: auto;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 24px;
+      line-height: 1.15;
+    }
+
+    .subtitle,
+    .hint {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.45;
+      margin: 0;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .metric,
+    .control-group {
+      border: 1px solid var(--line);
+      background: #12181b;
+      padding: 12px;
+    }
+
+    .metric strong {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+
+    .metric span {
+      font-size: 20px;
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .control-group {
+      display: grid;
+      gap: 12px;
+    }
+
+    .control {
+      display: grid;
+      gap: 6px;
+    }
+
+    label {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      color: var(--text);
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    label span {
+      color: var(--muted);
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--model);
+    }
+
+    .buttons {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    button {
+      appearance: none;
+      border: 1px solid #3b474d;
+      background: #202b30;
+      color: var(--text);
+      padding: 11px 12px;
+      font-size: 14px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #26343a;
+    }
+
+    button.is-active {
+      border-color: var(--model);
+      background: #1f3942;
+    }
+
+    .legend {
+      display: grid;
+      gap: 9px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .legend-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .swatch {
+      width: 24px;
+      height: 4px;
+      flex: none;
+    }
+
+    @media (max-width: 1100px) {
+      .app {
+        grid-template-columns: 1fr;
+      }
+
+      .stage {
+        min-height: auto;
+        padding: 14px;
+      }
+
+      .sidebar {
+        min-height: auto;
+        border-left: 0;
+        border-top: 1px solid var(--line);
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <section class="stage">
+      <canvas id="scene" width="900" height="900" aria-label="FTC 砲塔互動模擬器"></canvas>
+    </section>
+
+    <aside class="sidebar">
+      <div>
+        <h1>砲塔互動模擬器</h1>
+        <p class="subtitle">拖曳車子到場地任意位置，調整 heading，觀察程式瞄準線和實際射線差多少。</p>
+      </div>
+
+      <div class="metrics">
+        <div class="metric">
+          <strong>車體位置</strong>
+          <span id="poseReadout">x 100, y 100</span>
+        </div>
+        <div class="metric">
+          <strong>車身角度</strong>
+          <span id="headingReadout">0 度</span>
+        </div>
+        <div class="metric">
+          <strong>程式 yaw</strong>
+          <span id="modelYawReadout">0.0 度</span>
+        </div>
+        <div class="metric">
+          <strong>實際需要 yaw</strong>
+          <span id="realYawReadout">0.0 度</span>
+        </div>
+        <div class="metric">
+          <strong>yaw 誤差</strong>
+          <span id="errorReadout">0.0 度</span>
+        </div>
+        <div class="metric">
+          <strong>落點距離</strong>
+          <span id="missReadout">0.0 in</span>
+        </div>
+      </div>
+
+      <div class="control-group">
+        <div class="control">
+          <label for="heading">車身 heading <span id="headingValue">0 度</span></label>
+          <input id="heading" type="range" min="-180" max="180" step="1" value="0">
+        </div>
+        <div class="control">
+          <label for="actualForward">實際 TURRET_FORWARD_IN <span id="actualForwardValue">-10.0 in</span></label>
+          <input id="actualForward" type="range" min="-18" max="8" step="0.25" value="-10">
+        </div>
+        <div class="control">
+          <label for="modelForward">程式 TURRET_FORWARD_IN <span id="modelForwardValue">-3.5 in</span></label>
+          <input id="modelForward" type="range" min="-18" max="8" step="0.25" value="-3.5">
+        </div>
+        <div class="control">
+          <label for="yawScale">實際 yaw 比例 <span id="yawScaleValue">100%</span></label>
+          <input id="yawScale" type="range" min="70" max="130" step="1" value="100">
+        </div>
+        <div class="control">
+          <label for="yawOffset">YAW_OFFSET_DEG <span id="yawOffsetValue">0 度</span></label>
+          <input id="yawOffset" type="range" min="-30" max="30" step="1" value="0">
+        </div>
+        <div class="control">
+          <label for="curveBias">非線性偏差 <span id="curveBiasValue">30度時 -5.4 度</span></label>
+          <input id="curveBias" type="range" min="-0.015" max="0.015" step="0.001" value="-0.006">
+        </div>
+      </div>
+
+      <div class="buttons">
+        <button id="symptomPreset" type="button">你的症狀模式</button>
+        <button id="geometryPreset" type="button">只看前後偏移</button>
+        <button id="centerAim" type="button">回到正後方準</button>
+        <button id="reset" type="button">重設</button>
+        <button id="blueNear" type="button">藍方近點</button>
+        <button id="blueFar" type="button">藍方遠點</button>
+      </div>
+
+      <div class="legend">
+        <div class="legend-row"><span class="swatch" style="background: var(--goal)"></span>紅色：藍方左邊球門目標點</div>
+        <div class="legend-row"><span class="swatch" style="background: var(--model)"></span>藍線：程式以為會打到球門</div>
+        <div class="legend-row"><span class="swatch" style="background: var(--real)"></span>橘線：實際砲塔照命令射出去</div>
+        <div class="legend-row"><span class="swatch" style="background: var(--ideal)"></span>綠線：實際砲塔真正該射的方向</div>
+      </div>
+
+      <p class="hint">
+        「你的症狀模式」會讓 0.5 中心保持準，但角度越大會越偏向同一側；
+        所以一邊看起來補太多，另一邊看起來補太少。
+      </p>
+    </aside>
+  </main>
+
+  <script>
+    const canvas = document.getElementById("scene");
+    const ctx = canvas.getContext("2d");
+
+    const poseReadout = document.getElementById("poseReadout");
+    const headingReadout = document.getElementById("headingReadout");
+    const modelYawReadout = document.getElementById("modelYawReadout");
+    const realYawReadout = document.getElementById("realYawReadout");
+    const errorReadout = document.getElementById("errorReadout");
+    const missReadout = document.getElementById("missReadout");
+
+    const headingInput = document.getElementById("heading");
+    const actualForwardInput = document.getElementById("actualForward");
+    const modelForwardInput = document.getElementById("modelForward");
+    const yawScaleInput = document.getElementById("yawScale");
+    const yawOffsetInput = document.getElementById("yawOffset");
+    const curveBiasInput = document.getElementById("curveBias");
+
+    const headingValue = document.getElementById("headingValue");
+    const actualForwardValue = document.getElementById("actualForwardValue");
+    const modelForwardValue = document.getElementById("modelForwardValue");
+    const yawScaleValue = document.getElementById("yawScaleValue");
+    const yawOffsetValue = document.getElementById("yawOffsetValue");
+    const curveBiasValue = document.getElementById("curveBiasValue");
+
+    const symptomPresetButton = document.getElementById("symptomPreset");
+    const geometryPresetButton = document.getElementById("geometryPreset");
+    const centerAimButton = document.getElementById("centerAim");
+    const resetButton = document.getElementById("reset");
+    const blueNearButton = document.getElementById("blueNear");
+    const blueFarButton = document.getElementById("blueFar");
+
+    const W = canvas.width;
+    const H = canvas.height;
+    const pad = 68;
+    const fieldSize = W - pad * 2;
+    const goals = {
+      blueNear: { x: 8, y: 142 },
+      blueFar: { x: 3, y: 144 }
+    };
+    let goal = { ...goals.blueNear };
+    const turretLeft = 0;
+
+    const colors = {
+      bg: "#111418",
+      field: "#1b2424",
+      grid: "#2d3939",
+      robot: "#d8dee9",
+      model: "#69d2e7",
+      real: "#ffb454",
+      goal: "#ff5a5f",
+      ideal: "#83c77b",
+      text: "#eef2f5",
+      muted: "#9aa6b2",
+      shadow: "rgba(0,0,0,0.35)"
+    };
+
+    let state = {
+      robot: { x: 100, y: 100 },
+      heading: 0,
+      modelForward: -3.5,
+      actualForward: -3.5,
+      yawScale: 1,
+      yawOffset: 0,
+      curveBias: -0.006,
+      mode: "symptom"
+    };
+
+    let dragging = false;
+
+    function clamp(v, lo, hi) {
+      return Math.max(lo, Math.min(hi, v));
+    }
+
+    function rad(deg) {
+      return deg * Math.PI / 180;
+    }
+
+    function deg(radValue) {
+      return radValue * 180 / Math.PI;
+    }
+
+    function normDeg(v) {
+      while (v > 180) v -= 360;
+      while (v < -180) v += 360;
+      return v;
+    }
+
+    function fieldToScreen(p) {
+      return {
+        x: pad + (p.x / 144) * fieldSize,
+        y: pad + fieldSize - (p.y / 144) * fieldSize
+      };
+    }
+
+    function screenToField(p) {
+      return {
+        x: clamp(((p.x - pad) / fieldSize) * 144, 0, 144),
+        y: clamp((1 - ((p.y - pad) / fieldSize)) * 144, 0, 144)
+      };
+    }
+
+    function turretPoint(robot, headingDeg, forwardIn) {
+      const h = rad(headingDeg);
+      return {
+        x: robot.x + forwardIn * Math.cos(h) - turretLeft * Math.sin(h),
+        y: robot.y + forwardIn * Math.sin(h) + turretLeft * Math.cos(h)
+      };
+    }
+
+    function absoluteAngle(from, to) {
+      return deg(Math.atan2(to.y - from.y, to.x - from.x));
+    }
+
+    function yawToGoal(from, headingDeg) {
+      return normDeg(normDeg(absoluteAngle(from, goal) - headingDeg) - 180);
+    }
+
+    function rayPoint(from, angleDeg, length) {
+      const a = rad(angleDeg);
+      return {
+        x: from.x + Math.cos(a) * length,
+        y: from.y + Math.sin(a) * length
+      };
+    }
+
+    function closestPointOnRay(point, rayStart, angleDeg) {
+      const a = rad(angleDeg);
+      const ux = Math.cos(a);
+      const uy = Math.sin(a);
+      const vx = point.x - rayStart.x;
+      const vy = point.y - rayStart.y;
+      const t = Math.max(0, vx * ux + vy * uy);
+      return {
+        x: rayStart.x + ux * t,
+        y: rayStart.y + uy * t
+      };
+    }
+
+    function distance(a, b) {
+      return Math.hypot(a.x - b.x, a.y - b.y);
+    }
+
+    function modelYaw() {
+      const modelTurret = turretPoint(state.robot, state.heading, state.modelForward);
+      return normDeg(yawToGoal(modelTurret, state.heading) + state.yawOffset);
+    }
+
+    function realNeededYaw() {
+      const realTurret = turretPoint(state.robot, state.heading, state.actualForward);
+      return yawToGoal(realTurret, state.heading);
+    }
+
+    function curveYawError(commandedYaw) {
+      return state.curveBias * commandedYaw * commandedYaw;
+    }
+
+    function actualCommandedYaw(modelYawValue) {
+      const scaledYaw = modelYawValue * state.yawScale;
+      return scaledYaw + curveYawError(scaledYaw);
+    }
+
+    function actualShotAngle(modelYawValue) {
+      const commandedYaw = actualCommandedYaw(modelYawValue);
+      return state.heading + 180 + commandedYaw;
+    }
+
+    function centerAim() {
+      const modelTurret = turretPoint(state.robot, state.heading, state.modelForward);
+      state.heading = normDeg(absoluteAngle(modelTurret, goal) - 180);
+      state.yawOffset = 0;
+      syncInputs();
+      draw();
+    }
+
+    function setPreset(robot, headingDeg) {
+      state.robot = { ...robot };
+      state.heading = headingDeg;
+      syncInputs();
+      draw();
+    }
+
+    function drawLine(a, b, color, width, dash) {
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width;
+      ctx.lineCap = "round";
+      if (dash) ctx.setLineDash(dash);
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawArrow(a, b, color, width) {
+      drawLine(a, b, color, width);
+      const angle = Math.atan2(b.y - a.y, b.x - a.x);
+      ctx.save();
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(b.x, b.y);
+      ctx.lineTo(b.x - 16 * Math.cos(angle - 0.45), b.y - 16 * Math.sin(angle - 0.45));
+      ctx.lineTo(b.x - 16 * Math.cos(angle + 0.45), b.y - 16 * Math.sin(angle + 0.45));
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function drawText(text, x, y, size, color, weight = 700, align = "left") {
+      ctx.save();
+      ctx.fillStyle = color;
+      ctx.font = `${weight} ${size}px Microsoft JhengHei, Noto Sans TC, Segoe UI, Arial`;
+      ctx.textAlign = align;
+      ctx.textBaseline = "middle";
+      ctx.fillText(text, x, y);
+      ctx.restore();
+    }
+
+    function drawDot(p, r, color, label, dx = 12, dy = 0) {
+      ctx.save();
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      if (label) drawText(label, p.x + dx, p.y + dy, 14, colors.text, 800);
+    }
+
+    function drawField() {
+      ctx.fillStyle = colors.bg;
+      ctx.fillRect(0, 0, W, H);
+
+      ctx.fillStyle = colors.field;
+      ctx.strokeStyle = "#3a474a";
+      ctx.lineWidth = 2;
+      ctx.fillRect(pad, pad, fieldSize, fieldSize);
+      ctx.strokeRect(pad, pad, fieldSize, fieldSize);
+
+      ctx.strokeStyle = colors.grid;
+      ctx.lineWidth = 1;
+      for (let i = 0; i <= 6; i++) {
+        const v = pad + i * fieldSize / 6;
+        ctx.beginPath();
+        ctx.moveTo(v, pad);
+        ctx.lineTo(v, pad + fieldSize);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(pad, v);
+        ctx.lineTo(pad + fieldSize, v);
+        ctx.stroke();
+      }
+
+      const g = fieldToScreen(goal);
+      ctx.fillStyle = colors.goal;
+      ctx.beginPath();
+      ctx.arc(g.x, g.y, 15, 0, Math.PI * 2);
+      ctx.fill();
+      drawText("藍方球門目標", g.x + 22, g.y - 8, 16, colors.text, 800, "left");
+    }
+
+    function drawRobot() {
+      const center = fieldToScreen(state.robot);
+      const h = -rad(state.heading);
+      const scale = fieldSize / 144;
+      const rw = 18 * scale;
+      const rh = 15 * scale;
+
+      ctx.save();
+      ctx.translate(center.x, center.y);
+      ctx.rotate(h);
+      ctx.fillStyle = colors.shadow;
+      ctx.fillRect(-rw / 2 + 4, -rh / 2 + 5, rw, rh);
+      ctx.fillStyle = colors.robot;
+      ctx.strokeStyle = "#8893a0";
+      ctx.lineWidth = 2;
+      ctx.fillRect(-rw / 2, -rh / 2, rw, rh);
+      ctx.strokeRect(-rw / 2, -rh / 2, rw, rh);
+      ctx.fillStyle = "#2b343a";
+      ctx.beginPath();
+      ctx.moveTo(rw / 2 - 8, 0);
+      ctx.lineTo(rw / 2 - 28, -13);
+      ctx.lineTo(rw / 2 - 28, 13);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+
+      drawDot(center, 5, colors.text, "");
+    }
+
+    function draw() {
+      const modelTurret = turretPoint(state.robot, state.heading, state.modelForward);
+      const realTurret = turretPoint(state.robot, state.heading, state.actualForward);
+      const modelYawValue = modelYaw();
+      const realYawValue = realNeededYaw();
+      const actualYawValue = actualCommandedYaw(modelYawValue);
+      const shotAngle = actualShotAngle(modelYawValue);
+      const realLineEnd = rayPoint(realTurret, shotAngle, 180);
+      const idealLineEnd = rayPoint(realTurret, state.heading + 180 + realYawValue, 180);
+      const missPoint = closestPointOnRay(goal, realTurret, shotAngle);
+      const missIn = distance(goal, missPoint);
+      const yawError = normDeg(actualYawValue - realYawValue);
+
+      drawField();
+
+      const centerScreen = fieldToScreen(state.robot);
+      const modelScreen = fieldToScreen(modelTurret);
+      const realScreen = fieldToScreen(realTurret);
+      const goalScreen = fieldToScreen(goal);
+      const realEndScreen = fieldToScreen(realLineEnd);
+      const idealEndScreen = fieldToScreen(idealLineEnd);
+      const missScreen = fieldToScreen(missPoint);
+
+      drawLine(centerScreen, modelScreen, colors.model, 2, [7, 7]);
+      drawLine(centerScreen, realScreen, colors.real, 2, [7, 7]);
+      drawLine(modelScreen, goalScreen, colors.model, 3, [12, 10]);
+      drawLine(realScreen, idealEndScreen, colors.ideal, 2, [7, 8]);
+      drawArrow(realScreen, realEndScreen, colors.real, 5);
+      drawLine(goalScreen, missScreen, colors.goal, 4, [6, 5]);
+
+      drawRobot();
+      drawDot(modelScreen, 8, colors.model, "程式位置");
+      drawDot(realScreen, 8, colors.real, "實際出口");
+      drawDot(missScreen, 6, colors.real, "實際落點", 12, 16);
+
+      drawText("程式以為會打中", modelScreen.x + 22, modelScreen.y - 24, 15, colors.model, 800);
+      drawText("實際射出去的方向", realScreen.x + 22, realScreen.y + 26, 15, colors.real, 800);
+      drawText("拖曳車體；用右側滑桿旋轉 heading", pad, 34, 18, colors.text, 800);
+
+      poseReadout.textContent = `x ${state.robot.x.toFixed(0)}, y ${state.robot.y.toFixed(0)}`;
+      headingReadout.textContent = `${state.heading.toFixed(0)} 度`;
+      modelYawReadout.textContent = `${modelYawValue.toFixed(1)} 度`;
+      realYawReadout.textContent = `${realYawValue.toFixed(1)} 度`;
+      errorReadout.textContent = `${yawError.toFixed(1)} 度`;
+      missReadout.textContent = `${missIn.toFixed(1)} in`;
+
+      headingValue.textContent = `${state.heading.toFixed(0)} 度`;
+      actualForwardValue.textContent = `${state.actualForward.toFixed(1)} in`;
+      modelForwardValue.textContent = `${state.modelForward.toFixed(1)} in`;
+      yawScaleValue.textContent = `${Math.round(state.yawScale * 100)}%`;
+      yawOffsetValue.textContent = `${state.yawOffset.toFixed(0)} 度`;
+      curveBiasValue.textContent = `30度時 ${(state.curveBias * 900).toFixed(1)} 度`;
+      symptomPresetButton.classList.toggle("is-active", state.mode === "symptom");
+      geometryPresetButton.classList.toggle("is-active", state.mode === "geometry");
+    }
+
+    function syncInputs() {
+      headingInput.value = String(state.heading);
+      actualForwardInput.value = String(state.actualForward);
+      modelForwardInput.value = String(state.modelForward);
+      yawScaleInput.value = String(Math.round(state.yawScale * 100));
+      yawOffsetInput.value = String(state.yawOffset);
+      curveBiasInput.value = String(state.curveBias);
+    }
+
+    function canvasPoint(event) {
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: (event.clientX - rect.left) * (canvas.width / rect.width),
+        y: (event.clientY - rect.top) * (canvas.height / rect.height)
+      };
+    }
+
+    canvas.addEventListener("pointerdown", (event) => {
+      dragging = true;
+      canvas.setPointerCapture(event.pointerId);
+      state.robot = screenToField(canvasPoint(event));
+      draw();
+    });
+
+    canvas.addEventListener("pointermove", (event) => {
+      if (!dragging) return;
+      state.robot = screenToField(canvasPoint(event));
+      draw();
+    });
+
+    canvas.addEventListener("pointerup", () => {
+      dragging = false;
+    });
+
+    canvas.addEventListener("pointercancel", () => {
+      dragging = false;
+    });
+
+    headingInput.addEventListener("input", () => {
+      state.heading = Number(headingInput.value);
+      draw();
+    });
+
+    actualForwardInput.addEventListener("input", () => {
+      state.actualForward = Number(actualForwardInput.value);
+      state.mode = "custom";
+      draw();
+    });
+
+    modelForwardInput.addEventListener("input", () => {
+      state.modelForward = Number(modelForwardInput.value);
+      state.mode = "custom";
+      draw();
+    });
+
+    yawScaleInput.addEventListener("input", () => {
+      state.yawScale = Number(yawScaleInput.value) / 100;
+      state.mode = "custom";
+      draw();
+    });
+
+    yawOffsetInput.addEventListener("input", () => {
+      state.yawOffset = Number(yawOffsetInput.value);
+      state.mode = "custom";
+      draw();
+    });
+
+    curveBiasInput.addEventListener("input", () => {
+      state.curveBias = Number(curveBiasInput.value);
+      state.mode = "custom";
+      draw();
+    });
+
+    centerAimButton.addEventListener("click", centerAim);
+
+    symptomPresetButton.addEventListener("click", () => {
+      state.modelForward = -3.5;
+      state.actualForward = -3.5;
+      state.yawScale = 1;
+      state.yawOffset = 0;
+      state.curveBias = -0.006;
+      state.mode = "symptom";
+      syncInputs();
+      centerAim();
+    });
+
+    geometryPresetButton.addEventListener("click", () => {
+      state.modelForward = -3.5;
+      state.actualForward = -10;
+      state.yawScale = 1;
+      state.yawOffset = 0;
+      state.curveBias = 0;
+      state.mode = "geometry";
+      syncInputs();
+      centerAim();
+    });
+
+    resetButton.addEventListener("click", () => {
+      state = {
+        robot: { x: 100, y: 100 },
+        heading: 0,
+        modelForward: -3.5,
+        actualForward: -3.5,
+        yawScale: 1,
+        yawOffset: 0,
+        curveBias: -0.006,
+        mode: "symptom"
+      };
+      syncInputs();
+      centerAim();
+    });
+
+    blueNearButton.addEventListener("click", () => {
+      goal = { ...goals.blueNear };
+      setPreset({ x: 33, y: 135.5 }, 93);
+      centerAim();
+    });
+
+    blueFarButton.addEventListener("click", () => {
+      goal = { ...goals.blueFar };
+      setPreset({ x: 40, y: 100 }, 0);
+      centerAim();
+    });
+
+    centerAim();
+  </script>
+</body>
+</html>
